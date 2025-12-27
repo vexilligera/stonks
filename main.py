@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from utils import (
     get_order_info, get_current_time, is_market_hours, get_positions, get_open_orders,
-    open_limit_order, cancel_order, account
+    open_limit_order, cancel_order, get_buying_power, account
 )
 
 
@@ -463,8 +463,17 @@ class MeanReversionStrategy:
                         # Calculate shares
                         shares = max(1, int(self.notional_per_trade / current_price))
                         
-                        # Place buy order
+                        # Calculate order cost and check buying power
                         buy_price = current_price * 0.999
+                        order_cost = buy_price * shares
+                        buying_power = get_buying_power()
+                        
+                        if buying_power < order_cost:
+                            print(f"[MA_STRATEGY] SKIP BUY {symbol}: Insufficient buying power "
+                                  f"(${buying_power:.2f} < ${order_cost:.2f} needed)")
+                            continue
+                        
+                        # Place buy order
                         order_result = open_limit_order(symbol, buy_price, shares, "buy")
                         
                         if order_result and 'id' in order_result:
