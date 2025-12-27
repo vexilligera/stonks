@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MA Mean Reversion Bot</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --rh-green: #00C805;
+            --rh-green-dark: #00a804;
+            --rh-red: #FF5000;
+            --rh-black: #1E2124;
+            --rh-dark-gray: #2D3136;
+            --rh-gray: #6C7178;
+            --rh-light-gray: #C8CACF;
+            --rh-bg: #000000;
+            --rh-card: #1E2124;
+            --rh-card-hover: #2D3136;
+            --rh-border: #2D3136;
+            --rh-text: #FFFFFF;
+            --rh-text-secondary: #9DA0A5;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--rh-bg);
+            color: var(--rh-text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 24px 16px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0 32px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--rh-green);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo-icon svg {
+            width: 24px;
+            height: 24px;
+            fill: var(--rh-black);
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 24px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status-badge.running {
+            background: rgba(0, 200, 5, 0.15);
+            color: var(--rh-green);
+        }
+
+        .status-badge.stopped {
+            background: rgba(255, 80, 0, 0.15);
+            color: var(--rh-red);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-dot.running {
+            background: var(--rh-green);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.stopped {
+            background: var(--rh-red);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Stats Card */
+        .stats-card {
+            background: var(--rh-card);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--rh-border);
+        }
+
+        .stats-row:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .stats-row:first-child {
+            padding-top: 0;
+        }
+
+        .stats-label {
+            color: var(--rh-text-secondary);
+            font-size: 14px;
+        }
+
+        .stats-value {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        /* Action Buttons */
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 16px 24px;
+            font-family: inherit;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-primary {
+            background: var(--rh-green);
+            color: var(--rh-black);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--rh-green-dark);
+        }
+
+        .btn-secondary {
+            background: var(--rh-card);
+            color: var(--rh-text);
+            border: 1px solid var(--rh-border);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--rh-card-hover);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Logs Section */
+        .logs-section {
+            background: var(--rh-card);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .logs-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--rh-border);
+        }
+
+        .logs-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--rh-text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .logs-count {
+            font-size: 12px;
+            color: var(--rh-gray);
+            background: var(--rh-dark-gray);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .logs-body {
+            height: 320px;
+            overflow-y: auto;
+            padding: 16px 20px;
+            font-family: 'SF Mono', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.8;
+        }
+
+        .logs-body::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .logs-body::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .logs-body::-webkit-scrollbar-thumb {
+            background: var(--rh-border);
+            border-radius: 3px;
+        }
+
+        .log-line {
+            padding: 2px 0;
+            color: var(--rh-text-secondary);
+        }
+
+        .log-timestamp {
+            color: var(--rh-gray);
+            margin-right: 8px;
+        }
+
+        .log-empty {
+            color: var(--rh-gray);
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast.success {
+            background: var(--rh-green);
+            color: var(--rh-black);
+        }
+
+        .toast.error {
+            background: var(--rh-red);
+            color: white;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 24px 0;
+            color: var(--rh-gray);
+            font-size: 12px;
+        }
+
+        /* Config Section */
+        .config-section {
+            background: var(--rh-card);
+            border-radius: 12px;
+            margin-top: 16px;
+            overflow: hidden;
+        }
+
+        .config-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--rh-border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .config-header:hover {
+            background: var(--rh-card-hover);
+        }
+
+        .config-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--rh-text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .config-toggle {
+            color: var(--rh-gray);
+            transition: transform 0.2s ease;
+        }
+
+        .config-toggle.open {
+            transform: rotate(180deg);
+        }
+
+        .config-body {
+            display: none;
+            padding: 20px;
+        }
+
+        .config-body.open {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--rh-text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            font-family: inherit;
+            font-size: 14px;
+            background: var(--rh-bg);
+            border: 1px solid var(--rh-border);
+            border-radius: 8px;
+            color: var(--rh-text);
+            transition: border-color 0.15s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--rh-green);
+        }
+
+        .form-input::placeholder {
+            color: var(--rh-gray);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--rh-gray);
+            margin-top: 6px;
+        }
+
+        .btn-save {
+            width: 100%;
+            margin-top: 20px;
+            background: var(--rh-green);
+            color: var(--rh-black);
+        }
+
+        .btn-save:hover:not(:disabled) {
+            background: var(--rh-green-dark);
+        }
+
+        .config-warning {
+            background: rgba(255, 80, 0, 0.1);
+            border: 1px solid rgba(255, 80, 0, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            color: var(--rh-red);
+        }
+
+        /* Disabled config state when strategy is running */
+        .config-section.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .config-section.disabled .config-header {
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        .config-body.disabled .form-input {
+            background: var(--rh-dark-gray);
+            color: var(--rh-gray);
+            cursor: not-allowed;
+        }
+
+        .config-body.disabled .form-label {
+            color: var(--rh-gray);
+        }
+
+        .config-body.disabled .btn-save {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="logo">
+                <span class="logo-text">MA Mean Reversion</span>
+            </div>
+            <div class="status-badge stopped" id="status-badge">
+                <span class="status-dot stopped" id="status-dot"></span>
+                <span id="status-label">Offline</span>
+            </div>
+        </header>
+
+        <div class="stats-card">
+            <div class="stats-row">
+                <span class="stats-label">Process ID</span>
+                <span class="stats-value" id="pid">—</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label">Uptime</span>
+                <span class="stats-value" id="uptime">—</span>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-primary" id="btn-start" onclick="startBot()">
+                Start
+            </button>
+            <button class="btn btn-secondary" id="btn-stop" onclick="stopBot()" disabled>
+                Stop
+            </button>
+        </div>
+
+        <div class="logs-section">
+            <div class="logs-header">
+                <span class="logs-title">Activity</span>
+                <span class="logs-count" id="logs-count">0 entries</span>
+            </div>
+            <div class="logs-body" id="logs">
+                <div class="log-empty">No activity yet</div>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <div class="config-header" onclick="toggleConfig()">
+                <span class="config-title">Configuration</span>
+                <span class="config-toggle" id="config-toggle">▼</span>
+            </div>
+            <div class="config-body" id="config-body">
+                <div class="config-warning" id="config-warning" style="display: none;">
+                    Stop the bot before saving configuration changes.
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-input" id="cfg-username" placeholder="email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-input" id="cfg-password" placeholder="••••••••">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Symbols</label>
+                    <input type="text" class="form-input" id="cfg-symbols" placeholder="AAPL, MSFT, GOOGL, NVDA">
+                    <div class="form-hint">Comma-separated list of stock symbols to trade</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">MA Window (hours)</label>
+                        <input type="number" class="form-input" id="cfg-ma-window" step="1" placeholder="40">
+                        <div class="form-hint">Moving average period</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Notional Per Trade ($)</label>
+                        <input type="number" class="form-input" id="cfg-notional" step="50" placeholder="500">
+                        <div class="form-hint">Dollars per trade</div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Buy Threshold %</label>
+                        <input type="number" class="form-input" id="cfg-buy-threshold" step="0.5" placeholder="3.0">
+                        <div class="form-hint">Buy when X% below MA</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Take Profit %</label>
+                        <input type="number" class="form-input" id="cfg-take-profit" step="0.5" placeholder="5.0">
+                        <div class="form-hint">Sell when X% above entry</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Max Positions Per Symbol</label>
+                    <input type="number" class="form-input" id="cfg-max-positions" step="1" placeholder="10">
+                    <div class="form-hint">Maximum concurrent positions per symbol</div>
+                </div>
+
+                <button class="btn btn-save" id="btn-save" onclick="saveConfig()">
+                    Save Configuration
+                </button>
+            </div>
+        </div>
+
+        <div class="footer">
+            Mean Reversion Strategy • Buy below MA, Sell on profit
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let isRunning = false;
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function updateUI(status) {
+            const statusBadge = document.getElementById('status-badge');
+            const statusDot = document.getElementById('status-dot');
+            const statusLabel = document.getElementById('status-label');
+            const pid = document.getElementById('pid');
+            const uptime = document.getElementById('uptime');
+            const btnStart = document.getElementById('btn-start');
+            const btnStop = document.getElementById('btn-stop');
+
+            isRunning = status.running;
+
+            if (status.running) {
+                statusBadge.className = 'status-badge running';
+                statusDot.className = 'status-dot running';
+                statusLabel.textContent = 'Running';
+                pid.textContent = status.pid || '—';
+                uptime.textContent = status.uptime || '—';
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+            } else {
+                statusBadge.className = 'status-badge stopped';
+                statusDot.className = 'status-dot stopped';
+                statusLabel.textContent = 'Offline';
+                pid.textContent = '—';
+                uptime.textContent = '—';
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+            }
+        }
+
+        function updateLogs(logs) {
+            const logsDiv = document.getElementById('logs');
+            const logsCount = document.getElementById('logs-count');
+            
+            logsCount.textContent = `${logs.length} entries`;
+            
+            if (logs.length === 0) {
+                logsDiv.innerHTML = '<div class="log-empty">No activity yet</div>';
+            } else {
+                logsDiv.innerHTML = logs.map(log => {
+                    const match = log.match(/^\[(\d{2}:\d{2}:\d{2})\] (.*)$/);
+                    if (match) {
+                        return `<div class="log-line"><span class="log-timestamp">${match[1]}</span>${escapeHtml(match[2])}</div>`;
+                    }
+                    return `<div class="log-line">${escapeHtml(log)}</div>`;
+                }).join('');
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                updateUI(status);
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const data = await response.json();
+                updateLogs(data.logs);
+            } catch (error) {
+                console.error('Failed to fetch logs:', error);
+            }
+        }
+
+        async function startBot() {
+            try {
+                const response = await fetch('/api/start', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(result.message, 'success');
+                } else {
+                    showToast(result.message, 'error');
+                }
+                fetchStatus();
+            } catch (error) {
+                showToast('Failed to start bot', 'error');
+            }
+        }
+
+        async function stopBot() {
+            try {
+                const response = await fetch('/api/stop', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(result.message, 'success');
+                } else {
+                    showToast(result.message, 'error');
+                }
+                fetchStatus();
+            } catch (error) {
+                showToast('Failed to stop bot', 'error');
+            }
+        }
+
+        // Config functions
+        let configOpen = false;
+
+        function toggleConfig() {
+            configOpen = !configOpen;
+            document.getElementById('config-body').classList.toggle('open', configOpen);
+            document.getElementById('config-toggle').classList.toggle('open', configOpen);
+            if (configOpen) {
+                fetchConfig();
+            }
+        }
+
+        async function fetchConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+                if (data.success) {
+                    const cfg = data.config;
+                    document.getElementById('cfg-username').value = cfg.username || '';
+                    document.getElementById('cfg-password').value = cfg.password || '';
+                    document.getElementById('cfg-symbols').value = (cfg.symbols || []).join(', ');
+                    document.getElementById('cfg-ma-window').value = cfg.ma_window || 40;
+                    document.getElementById('cfg-notional').value = cfg.notional_per_trade || 500;
+                    document.getElementById('cfg-buy-threshold').value = (cfg.buy_threshold || 0.03) * 100;
+                    document.getElementById('cfg-take-profit').value = (cfg.take_profit || 0.05) * 100;
+                    document.getElementById('cfg-max-positions').value = cfg.max_positions_per_symbol || 10;
+                }
+            } catch (error) {
+                console.error('Failed to fetch config:', error);
+            }
+        }
+
+        async function saveConfig() {
+            if (isRunning) {
+                showToast('Stop the bot before saving config', 'error');
+                return;
+            }
+
+            const symbols = document.getElementById('cfg-symbols').value
+                .split(',')
+                .map(s => s.trim().toUpperCase())
+                .filter(s => s.length > 0);
+
+            const config = {
+                broker: 'robinhood',
+                username: document.getElementById('cfg-username').value,
+                password: document.getElementById('cfg-password').value,
+                symbols: symbols,
+                data_dir: './ma_strategy_data',
+                ma_window: parseInt(document.getElementById('cfg-ma-window').value) || 40,
+                buy_threshold: (parseFloat(document.getElementById('cfg-buy-threshold').value) || 3.0) / 100,
+                take_profit: (parseFloat(document.getElementById('cfg-take-profit').value) || 5.0) / 100,
+                notional_per_trade: parseFloat(document.getElementById('cfg-notional').value) || 500,
+                max_positions_per_symbol: parseInt(document.getElementById('cfg-max-positions').value) || 10
+            };
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast('Configuration saved', 'success');
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Failed to save config', 'error');
+            }
+        }
+
+        // Update warning visibility and disable config inputs based on bot status
+        function updateConfigState() {
+            const warning = document.getElementById('config-warning');
+            const configSection = document.querySelector('.config-section');
+            const configBody = document.getElementById('config-body');
+            const configInputs = configBody.querySelectorAll('.form-input');
+            const saveBtn = document.getElementById('btn-save');
+
+            if (warning) {
+                warning.style.display = isRunning ? 'block' : 'none';
+            }
+
+            // Toggle disabled state on config section
+            if (configSection) {
+                configSection.classList.toggle('disabled', isRunning);
+            }
+            if (configBody) {
+                configBody.classList.toggle('disabled', isRunning);
+            }
+
+            // Disable/enable all config inputs
+            configInputs.forEach(input => {
+                input.disabled = isRunning;
+            });
+
+            // Disable/enable save button
+            if (saveBtn) {
+                saveBtn.disabled = isRunning;
+            }
+        }
+
+        // Extend updateUI to handle config state
+        const originalUpdateUI = updateUI;
+        updateUI = function(status) {
+            originalUpdateUI(status);
+            updateConfigState();
+        };
+
+        // Initial fetch
+        fetchStatus();
+        fetchLogs();
+
+        // Poll for updates
+        setInterval(fetchStatus, 2000);
+        setInterval(fetchLogs, 2000);
+    </script>
+</body>
+</html>

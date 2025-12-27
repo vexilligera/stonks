@@ -1,0 +1,32 @@
+{
+    "broker": "robinhood",
+    "username": "put your username here, only robinhood is supported currently",
+    "password": "put your password here and rename this file to config.json",
+    "data_dir": "./ma_strategy_data",
+    "ma_window": 40,
+    "buy_threshold": 0.03,
+    "take_profit": 0.05,
+    "notional_per_trade": 500.0,
+    "max_positions_per_symbol": 15,
+    "symbols": [
+        "AAPL",
+        "AMD",
+        "IBM",
+        "ORCL",
+        "AMZN",
+        "GE",
+        "INTC",
+        "MSFT",
+        "AVGO",
+        "GOOGL",
+        "TSLA",
+        "CSCO",
+        "META",
+        "NVDA",
+        "QCOM",
+        "TSM",
+        "PLTR",
+        "ASML",
+        "MU"
+    ]
+}

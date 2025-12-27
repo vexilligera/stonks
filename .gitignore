@@ -1,0 +1,6 @@
+.cursor/
+.vscode/
+ma_strategy_data/
+__pycache__/
+
+config.json
