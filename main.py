@@ -28,11 +28,12 @@ class MeanReversionStrategy:
         symbols: list[str] = [
             "AAPL", "AMD", "IBM", "ORCL", "AMZN", "GE", "INTC", "MSFT",
             "AVGO", "GOOGL", "TSLA", "CSCO", "META", "NVDA", "QCOM",
-            "TSM", "PLTR", "ASML", "MU"
+            "TSM", "PLTR", "ASML", "MU", "BABA", "LKNCY"
         ],
         ma_window: int = 40,  # 40 hours
         buy_threshold: float = 0.03,  # Buy when price is 3% below MA
         take_profit: float = 0.05,  # Sell when price is 5% above entry cost
+        stop_loss: float = 0.10,  # Stop loss when price is 10% below entry cost
         notional_per_trade: float = 500.0,  # Dollars per trade
         max_positions_per_symbol: int = 10,  # Max positions per symbol
         data_dir: str = "./ma_strategy_data",  # Directory for persistent storage
@@ -42,6 +43,7 @@ class MeanReversionStrategy:
         self.ma_window = ma_window
         self.buy_threshold = buy_threshold
         self.take_profit = take_profit
+        self.stop_loss = stop_loss
         self.notional_per_trade = notional_per_trade
         self.max_positions_per_symbol = max_positions_per_symbol
         self.data_dir = data_dir
@@ -67,7 +69,7 @@ class MeanReversionStrategy:
         self.load_state()
         
         print(f"[MA_STRATEGY] Initialized with {len(symbols)} symbols")
-        print(f"[MA_STRATEGY] MA window: {ma_window}h, Buy: -{buy_threshold*100:.1f}%, TP: +{take_profit*100:.1f}%")
+        print(f"[MA_STRATEGY] MA window: {ma_window}h, Buy: -{buy_threshold*100:.1f}%, TP: +{take_profit*100:.1f}%, SL: -{stop_loss*100:.1f}%")
         print(f"[MA_STRATEGY] Data dir: {self.data_dir}")
         print(f"[MA_STRATEGY] Loaded {len(self.pending_orders)} pending orders, "
               f"{sum(len(e) for e in self.position_entries.values())} position entries, "
@@ -397,57 +399,66 @@ class MeanReversionStrategy:
             deviation = (current_price - current_ma) / current_ma
             
             # --- CHECK SELL SIGNALS FIRST ---
-            # Sell when: price >= entry + take_profit AND ma_derivative <= 0
+            # Sell when: 
+            #   1. STOP LOSS: price <= entry * (1 - stop_loss) - sell immediately
+            #   2. TAKE PROFIT: price >= entry * (1 + take_profit) AND ma_derivative <= 0
             if symbol in self.position_entries and len(self.position_entries[symbol]) > 0:
-                if ma_derivative <= 0:  # Only sell when trend is weakening
-                    entries_to_sell = []
+                entries_to_sell = []
+                
+                for i, entry in enumerate(self.position_entries[symbol]):
+                    entry_price = entry['entry_price']
+                    shares = entry['shares']
+                    gain = (current_price - entry_price) / entry_price
                     
-                    for i, entry in enumerate(self.position_entries[symbol]):
-                        entry_price = entry['entry_price']
-                        shares = entry['shares']
-                        gain = (current_price - entry_price) / entry_price
-                        
-                        if gain >= self.take_profit:
-                            # Place sell order (if no pending order for this symbol)
-                            if symbol not in pending_symbols:
-                                order_result = open_limit_order(symbol, current_price, shares, "sell")
+                    # Check STOP LOSS first (triggers immediately, no MA derivative check)
+                    stop_loss_triggered = gain <= -self.stop_loss
+                    # Check TAKE PROFIT (only when MA derivative <= 0)
+                    take_profit_triggered = gain >= self.take_profit and ma_derivative <= 0
+                    
+                    if stop_loss_triggered or take_profit_triggered:
+                        # Place sell order (if no pending order for this symbol)
+                        if symbol not in pending_symbols:
+                            order_result = open_limit_order(symbol, current_price, shares, "sell")
+                            
+                            if order_result and 'id' in order_result:
+                                order_id = order_result['id']
                                 
-                                if order_result and 'id' in order_result:
-                                    order_id = order_result['id']
-                                    
-                                    # Track as pending order
-                                    self.pending_orders[order_id] = {
-                                        'symbol': symbol,
-                                        'side': 'sell',
+                                # Track as pending order
+                                self.pending_orders[order_id] = {
+                                    'symbol': symbol,
+                                    'side': 'sell',
+                                    'shares': shares,
+                                    'limit_price': current_price,
+                                    'placed_time': current_time.isoformat(),
+                                    'entry_info': {
+                                        'entry_price': entry_price,
+                                        'entry_time': entry['entry_time'].isoformat() if isinstance(entry['entry_time'], datetime) else entry['entry_time'],
                                         'shares': shares,
-                                        'limit_price': current_price,
-                                        'placed_time': current_time.isoformat(),
-                                        'entry_info': {
-                                            'entry_price': entry_price,
-                                            'entry_time': entry['entry_time'].isoformat() if isinstance(entry['entry_time'], datetime) else entry['entry_time'],
-                                            'shares': shares,
-                                        },
-                                    }
-                                    
-                                    entries_to_sell.append(i)
-                                    pending_symbols.add(symbol)  # Prevent multiple orders
-                                    
-                                    new_sell_orders.append({
-                                        'symbol': symbol,
-                                        'price': current_price,
-                                        'shares': shares,
-                                        'gain_pct': gain * 100,
-                                        'order_id': order_id,
-                                    })
-                                    print(f"[MA_STRATEGY] SELL ORDER PLACED: {symbol} {shares} shares @ ${current_price:.2f}, "
-                                          f"gain: {gain*100:.2f}%, MA deriv: {ma_derivative:.4f}, order_id: {order_id}")
-                    
-                    # Remove entries that have pending sell orders (in reverse order)
-                    for i in reversed(entries_to_sell):
-                        self.position_entries[symbol].pop(i)
-                    
-                    if symbol in self.position_entries and len(self.position_entries[symbol]) == 0:
-                        del self.position_entries[symbol]
+                                    },
+                                    'reason': 'stop_loss' if stop_loss_triggered else 'take_profit',
+                                }
+                                
+                                entries_to_sell.append(i)
+                                pending_symbols.add(symbol)  # Prevent multiple orders
+                                
+                                reason = "STOP LOSS" if stop_loss_triggered else "TAKE PROFIT"
+                                new_sell_orders.append({
+                                    'symbol': symbol,
+                                    'price': current_price,
+                                    'shares': shares,
+                                    'gain_pct': gain * 100,
+                                    'order_id': order_id,
+                                    'reason': reason,
+                                })
+                                print(f"[MA_STRATEGY] SELL ORDER PLACED ({reason}): {symbol} {shares} shares @ ${current_price:.2f}, "
+                                      f"gain: {gain*100:.2f}%, MA deriv: {ma_derivative:.4f}, order_id: {order_id}")
+                
+                # Remove entries that have pending sell orders (in reverse order)
+                for i in reversed(entries_to_sell):
+                    self.position_entries[symbol].pop(i)
+                
+                if symbol in self.position_entries and len(self.position_entries[symbol]) == 0:
+                    del self.position_entries[symbol]
             
             # --- CHECK BUY SIGNALS ---
             # Buy when price is X% below MA
@@ -600,6 +611,19 @@ class TradingBot:
 
     def start(self):
         self.account.init(self.config_path)
+        config = json.load(open(self.config_path))
+        self.strategy.stop_loss = config.get('stop_loss', 0.10)
+        self.strategy.take_profit = config.get('take_profit', 0.05)
+        self.strategy.buy_threshold = config.get('buy_threshold', 0.03)
+        self.strategy.ma_window = config.get('ma_window', 40)
+        self.strategy.notional_per_trade = config.get('notional_per_trade', 500.0)
+        self.strategy.max_positions_per_symbol = config.get('max_positions_per_symbol', 15)
+        self.strategy.data_dir = config.get('data_dir', './ma_strategy_data')
+        self.strategy.symbols = config.get('symbols', [
+            "AAPL", "AMD", "IBM", "ORCL", "AMZN", "GE", "INTC", "MSFT",
+            "AVGO", "GOOGL", "TSLA", "CSCO", "META", "NVDA", "QCOM",
+            "TSM", "PLTR", "ASML", "MU", "BABA", "LKNCY"
+        ])
         while True:
             self.account.login()
             self.strategy.run()

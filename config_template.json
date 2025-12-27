@@ -6,6 +6,7 @@
     "ma_window": 40,
     "buy_threshold": 0.03,
     "take_profit": 0.05,
+    "stop_loss": 0.10,
     "notional_per_trade": 500.0,
     "max_positions_per_symbol": 15,
     "symbols": [
