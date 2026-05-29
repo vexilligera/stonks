@@ -4,10 +4,14 @@ from datetime import datetime, timedelta
 import json
 import numpy as np
 import pandas as pd
+import yfinance as yf
+from typing import Dict
 from utils import (
     get_order_info, get_current_time, is_market_hours, get_positions, get_open_orders,
-    open_limit_order, cancel_order, get_buying_power, account
+    open_limit_order, cancel_order, get_buying_power, open_market_order, get_last_price,
+    account, fetch_bar_data, get_realtime_prices
 )
+from build_dataset import create_proxy_session
 
 
 class MeanReversionStrategy:
@@ -69,6 +73,7 @@ class MeanReversionStrategy:
         self.load_state()
         
         print(f"[MA_STRATEGY] Initialized with {len(symbols)} symbols")
+        print(f"[MA_STRATEGY] Using symbols: {symbols}")
         print(f"[MA_STRATEGY] MA window: {ma_window}h, Buy: -{buy_threshold*100:.1f}%, TP: +{take_profit*100:.1f}%, SL: -{stop_loss*100:.1f}%")
         print(f"[MA_STRATEGY] Data dir: {self.data_dir}")
         print(f"[MA_STRATEGY] Loaded {len(self.pending_orders)} pending orders, "
@@ -237,7 +242,7 @@ class MeanReversionStrategy:
     
     def fetch_hourly_data(self, current_time: datetime) -> dict[str, pd.DataFrame]:
         """
-        Fetch hourly OHLC data for all symbols.
+        Fetch hourly OHLC data for all symbols in a single batch request.
         
         Args:
             current_time: Current datetime
@@ -245,39 +250,67 @@ class MeanReversionStrategy:
         Returns:
             Dict of symbol -> DataFrame with hourly data
         """
-        import yfinance as yf
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        
         # Need enough data for MA calculation (ma_window + buffer)
         lookback_days = (self.ma_window // 7) + 10  # ~7 trading hours per day
         start_date = current_time - timedelta(days=lookback_days)
         
-        def fetch_symbol(symbol):
+        max_retries = 2
+        result = {}
+        
+        for attempt in range(max_retries):
             try:
+                # Create proxy session for this request
+                session = create_proxy_session()
+                
+                # Batch download all symbols at once
                 df = yf.download(
-                    symbol,
+                    self.symbols,
                     start=start_date.strftime('%Y-%m-%d'),
                     end=(current_time + timedelta(days=1)).strftime('%Y-%m-%d'),
                     interval='1h',
-                    progress=False
+                    progress=False,
+                    session=session,
+                    group_by='ticker',
+                    threads=True
                 )
+                
                 if df.empty:
-                    return symbol, None
-                return symbol, df
+                    return {}
+                
+                # Handle single vs multiple symbols
+                if len(self.symbols) == 1:
+                    symbol = self.symbols[0]
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = [c[0] for c in df.columns]
+                    if len(df) >= self.ma_window:
+                        result[symbol] = df
+                else:
+                    # Multiple symbols - iterate through each
+                    for symbol in self.symbols:
+                        try:
+                            if symbol not in df.columns.get_level_values(0):
+                                continue
+                            
+                            symbol_df = df[symbol].copy()
+                            
+                            # Drop rows with all NaN
+                            symbol_df = symbol_df.dropna(how='all')
+                            
+                            if len(symbol_df) >= self.ma_window:
+                                result[symbol] = symbol_df
+                        except Exception as e:
+                            print(f"[MA_STRATEGY] Error processing {symbol}: {e}")
+                            continue
+                
+                print(f"[MA_STRATEGY] Fetched data for {len(result)}/{len(self.symbols)} symbols")
+                return result
             except Exception as e:
-                print(f"[MA_STRATEGY] Error fetching {symbol}: {e}")
-                return symbol, None
-        
-        results = {}
-        with ThreadPoolExecutor(max_workers=min(20, len(self.symbols))) as executor:
-            futures = {executor.submit(fetch_symbol, s): s for s in self.symbols}
-            for future in as_completed(futures):
-                symbol, df = future.result()
-                if df is not None and len(df) >= self.ma_window:
-                    results[symbol] = df
-        
-        print(f"[MA_STRATEGY] Fetched data for {len(results)}/{len(self.symbols)} symbols")
-        return results
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(0.1)
+                    continue
+                print(f"[MA_STRATEGY] Error fetching batch data: {e}")
+                return {}
     
     def compute_ma(self, df: pd.DataFrame) -> tuple[float, float]:
         """
@@ -604,33 +637,90 @@ class MeanReversionStrategy:
 
 
 class TradingBot:
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, strategy_type: str = "scalping"):
         self.config_path = config_path
         self.account = account
-        self.strategy = MeanReversionStrategy()
+        self.strategy_type = strategy_type
+        self.strategy = None
+    
+    def _init_mean_reversion_strategy(self, config: dict):
+        """Initialize the Mean Reversion Strategy."""
+        self.strategy = MeanReversionStrategy(
+            symbols=config.get('symbols', [
+            "AAPL", "AMD", "IBM", "ORCL", "AMZN", "GE", "INTC", "MSFT",
+            "AVGO", "GOOGL", "TSLA", "CSCO", "META", "NVDA", "QCOM",
+            "TSM", "PLTR", "ASML", "MU", "BABA", "LKNCY"
+            ]),
+            ma_window=config.get('ma_window', 40),
+            buy_threshold=config.get('buy_threshold', 0.03),
+            take_profit=config.get('take_profit', 0.05),
+            stop_loss=config.get('stop_loss', 0.10),
+            notional_per_trade=config.get('notional_per_trade', 500.0),
+            max_positions_per_symbol=config.get('max_positions_per_symbol', 15),
+            data_dir=config.get('data_dir', './ma_strategy_data'),
+            execution_interval=config.get('execution_interval', 3600),
+        )
 
     def start(self):
         self.account.init(self.config_path)
         config = json.load(open(self.config_path))
-        self.strategy.stop_loss = config.get('stop_loss', 0.10)
-        self.strategy.take_profit = config.get('take_profit', 0.05)
-        self.strategy.buy_threshold = config.get('buy_threshold', 0.03)
-        self.strategy.ma_window = config.get('ma_window', 40)
-        self.strategy.notional_per_trade = config.get('notional_per_trade', 500.0)
-        self.strategy.max_positions_per_symbol = config.get('max_positions_per_symbol', 15)
-        self.strategy.data_dir = config.get('data_dir', './ma_strategy_data')
-        self.strategy.symbols = config.get('symbols', [
-            "AAPL", "AMD", "IBM", "ORCL", "AMZN", "GE", "INTC", "MSFT",
-            "AVGO", "GOOGL", "TSLA", "CSCO", "META", "NVDA", "QCOM",
-            "TSM", "PLTR", "ASML", "MU", "BABA", "LKNCY"
-        ])
+        
+        # Override strategy type from config if specified
+        strategy_type = config.get('strategy', self.strategy_type)
+        
+        if strategy_type == "mean_reversion":
+            self._init_mean_reversion_strategy(config)
+            print("[BOT] Using Mean Reversion Strategy")
+        else:
+            raise ValueError(f"Unknown strategy type: {strategy_type}")
+        
+        print(f"[BOT] Execution interval: {self.strategy.execution_interval}s")
+        self.account.login()
+        buying_power = get_buying_power()
+        print(f"[BOT] Buying power: ${buying_power:.2f}")
+        
+        # Start WebSocket bar stream for real-time data (if scalping strategy)
+        if strategy_type == "scalping" and hasattr(self.strategy, 'start_bar_stream'):
+            self.strategy.start_bar_stream()
+        
+        last_run_minute = -1
+        
         while True:
-            self.account.login()
-            self.strategy.run()
-            time.sleep(self.strategy.execution_interval)
+            interval = self.strategy.execution_interval
+            if interval == 60:
+                # Always execute at the 55th second of the minute
+                now = datetime.now()
+                
+                # Check if we already ran this minute
+                if now.minute == last_run_minute:
+                    # Wait until the next minute starts to avoid busy-waiting
+                    time.sleep(1)
+                    continue
+
+                target_time = now.replace(second=55, microsecond=0)
+                if now.second >= 55:
+                    target_time += timedelta(minutes=1)
+
+                sleep_seconds = (target_time - now).total_seconds()
+                if sleep_seconds > 0:
+                    time.sleep(sleep_seconds)
+                
+                last_run_minute = datetime.now().minute
+                self.strategy.run()
+            else:
+                self.strategy.run()
+                time.sleep(interval)
 
 
 if __name__ == "__main__":
-    config_path = "config.json"
-    bot = TradingBot(config_path)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Trading Bot")
+    parser.add_argument("--config", type=str, default="config_ma.json", help="Config file path")
+    parser.add_argument("--strategy", type=str, default="mean_reversion", 
+                        choices=["scalping", "mean_reversion"],
+                        help="Strategy to use (default: scalping)")
+    args = parser.parse_args()
+    
+    bot = TradingBot(args.config, args.strategy)
     bot.start()
